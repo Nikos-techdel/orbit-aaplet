@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Interactive Satellite Orbits</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0b1020;
+      color: #e6e8f0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .panel {
+      background: #121833;
+      border-radius: 16px;
+      padding: 16px 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      width: 480px;
+    }
+    canvas {
+      background: radial-gradient(circle at center, #0e1430, #060914);
+      border-radius: 12px;
+      display: block;
+      margin-bottom: 12px;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 6px 12px;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    input[type=range] {
+      grid-column: 1 / -1;
+    }
+    button {
+      border-radius: 8px;
+      border: none;
+      padding: 6px 10px;
+      background: #2b6cff;
+      color: white;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: #444b7a;
+    }
+    .value {
+      text-align: right;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+<div class="panel">
+  <canvas id="canvas" width="440" height="440"></canvas>
+
+  <div class="controls">
+    <div>Altitude (km)</div><div class="value" id="altVal"></div>
+    <input type="range" id="altitude" min="200" max="36000" step="100" value="400">
+
+    <div>Initial speed (% of circular)</div><div class="value" id="speedVal"></div>
+    <input type="range" id="speed" min="50" max="150" step="1" value="100">
+
+    <div>Orbital period</div><div class="value" id="periodVal"></div>
+    <div>Speed</div><div class="value" id="vVal"></div>
+    <div>Acceleration</div><div class="value" id="aVal"></div>
+
+    <button id="pauseBtn">Pause</button>
+    <button id="stepBtn" class="secondary">Step</button>
+    <button id="resetBtn" class="secondary">Reset</button>
+  </div>
+</div>
+
+<script>
+// Physical constants
+const G = 6.674e-11;
+const M = 5.972e24;
+const R_E = 6371e3;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+const altitude = document.getElementById('altitude');
+const speedSlider = document.getElementById('speed');
+
+const altVal = document.getElementById('altVal');
+const speedVal = document.getElementById('speedVal');
+const periodVal = document.getElementById('periodVal');
+const vVal = document.getElementById('vVal');
+const aVal = document.getElementById('aVal');
+
+let paused = false;
+let singleStep = false;
+
+let r, v0;
+let pos, vel;
+
+function resetOrbit() {
+  const h = Number(altitude.value) * 1000;
+  r = R_E + h;
+
+  const vCirc = Math.sqrt(G * M / r);
+  v0 = vCirc * Number(speedSlider.value) / 100;
+
+  pos = { x: r, y: 0 };
+  vel = { x: 0, y: v0 };
+
+  const period = 2 * Math.PI * r / vCirc;
+  periodVal.textContent = (period / 3600).toFixed(2) + ' h';
+}
+
+function drawVector(x, y, vx, vy, scale, color) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + vx * scale, y + vy * scale);
+  ctx.strokeStyle = color;
+  ctx.stroke();
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+
+  // Earth
+  ctx.beginPath();
+  ctx.arc(0, 0, 60, 0, 2 * Math.PI);
+  ctx.fillStyle = '#2b6cff';
+  ctx.fill();
+
+  // Position
+  const scale = 1 / 1.2e5;
+  const x = pos.x * scale;
+  const y = pos.y * scale;
+
+  // Satellite
+  ctx.beginPath();
+  ctx.arc(x, y, 4, 0, 2 * Math.PI);
+  ctx.fillStyle = '#ffcc00';
+  ctx.fill();
+
+  // Velocity vector
+  drawVector(x, y, vel.x, vel.y, scale * 40, '#00ffcc');
+
+  // Acceleration vector
+  const dist = Math.hypot(pos.x, pos.y);
+  const aMag = G * M / (dist * dist);
+  drawVector(x, y, -pos.x / dist * aMag, -pos.y / dist * aMag, scale * 1e6, '#ff6666');
+
+  ctx.restore();
+
+  vVal.textContent = (Math.hypot(vel.x, vel.y) / 1000).toFixed(2) + ' km/s';
+  aVal.textContent = aMag.toFixed(3) + ' m/s²';
+}
+
+function step(dt) {
+  const dist = Math.hypot(pos.x, pos.y);
+  const acc = {
+    x: -G * M * pos.x / Math.pow(dist, 3),
+    y: -G * M * pos.y / Math.pow(dist, 3)
+  };
+
+  vel.x += acc.x * dt;
+  vel.y += acc.y * dt;
+
+  pos.x += vel.x * dt;
+  pos.y += vel.y * dt;
+}
+
+let lastTime = null;
+function animate(t) {
+  if (!lastTime) lastTime = t;
+  const dt = (t - lastTime) / 1000 * 2000;
+  lastTime = t;
+
+  if (!paused || singleStep) {
+    step(dt);
+    singleStep = false;
+  }
+
+  draw();
+  requestAnimationFrame(animate);
+}
+
+// UI bindings
+altitude.oninput = () => { altVal.textContent = altitude.value; resetOrbit(); };
+speedSlider.oninput = () => { speedVal.textContent = speedSlider.value + '%'; resetOrbit(); };
+
+document.getElementById('pauseBtn').onclick = () => paused = !paused;
+document.getElementById('stepBtn').onclick = () => { paused = true; singleStep = true; };
+document.getElementById('resetBtn').onclick = resetOrbit;
+
+altVal.textContent = altitude.value;
+speedVal.textContent = speedSlider.value + '%';
+resetOrbit();
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
+
